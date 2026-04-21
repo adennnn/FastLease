@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import type { PostSession } from './GenerateListingFlow'
 
 interface Props {
@@ -67,10 +68,57 @@ export default function MultiSessionView({ sessions, onRetry, onDismissAll, onOp
 }
 
 function SessionTile({ session, onRetry, onConnected, successLabel, successLinkLabel }: { session: PostSession; onRetry: () => void; onConnected?: () => void; successLabel?: string; successLinkLabel?: string }) {
+  const [ending, setEnding] = useState(false)
+  const [ended, setEnded] = useState(false)
+  const endedRef = useRef(false)
+  const stopAttemptedRef = useRef(false)
+
+  const stopBU = async (sessionId: string) => {
+    if (stopAttemptedRef.current) return
+    stopAttemptedRef.current = true
+    try {
+      await fetch('/api/sessions/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+    } catch {}
+  }
+
+  // If End was clicked before the BU session id arrived, stop it as soon as we know it.
+  useEffect(() => {
+    if (endedRef.current && session.browserSessionId && !stopAttemptedRef.current) {
+      stopBU(session.browserSessionId)
+    }
+  }, [session.browserSessionId])
+
   const borderClass =
-    session.state === 'success' ? 'border-green-500/50'
+    ended ? 'border-red-500/50'
+    : session.state === 'success' ? 'border-green-500/50'
     : session.state === 'failed' ? 'border-red-500/50'
     : 'border-gray-200 dark:border-zinc-700'
+
+  const isTerminal = session.state === 'success' || session.state === 'failed' || ended
+  const canEnd = !isTerminal
+
+  const handleEnd = async () => {
+    if (ending || ended) return
+    setEnding(true)
+    if (session.browserSessionId) {
+      await stopBU(session.browserSessionId)
+    }
+    endedRef.current = true
+    setEnded(true)
+    setEnding(false)
+  }
+
+  const handleRetry = () => {
+    endedRef.current = false
+    stopAttemptedRef.current = false
+    setEnded(false)
+    setEnding(false)
+    onRetry()
+  }
 
   return (
     <div className={`border ${borderClass} rounded-lg overflow-hidden bg-white dark:bg-zinc-900 flex flex-col`}>
@@ -85,7 +133,14 @@ function SessionTile({ session, onRetry, onConnected, successLabel, successLinkL
 
       {/* Body */}
       <div className="relative bg-gray-50 dark:bg-zinc-950" style={{ aspectRatio: '16/10' }}>
-        {session.state === 'success' ? (
+        {ended && session.state !== 'success' && session.state !== 'failed' ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
+            <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-2">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgb(239 68 68)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+            </div>
+            <p className="text-xs font-medium text-red-500">Stopped</p>
+          </div>
+        ) : session.state === 'success' ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
             <div className="w-12 h-12 rounded-full bg-green-500/10 flex items-center justify-center mb-2">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgb(34 197 94)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -121,13 +176,27 @@ function SessionTile({ session, onRetry, onConnected, successLabel, successLinkL
       </div>
 
       {/* Footer */}
-      {session.state === 'failed' ? (
+      {session.state === 'failed' || (ended && session.state !== 'success') ? (
         <button
-          onClick={onRetry}
+          onClick={handleRetry}
           className="w-full py-2 text-xs font-medium border-t border-gray-100 dark:border-zinc-800 text-black dark:text-zinc-50 hover:bg-gray-50 dark:hover:bg-zinc-800 transition"
         >
           Retry
         </button>
+      ) : canEnd ? (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-gray-100 dark:border-zinc-800">
+          <span className="flex-1 text-[11px] text-gray-500 dark:text-zinc-400 truncate">
+            {ending ? 'Ending…' : (session.status || '')}
+          </span>
+          <button
+            onClick={handleEnd}
+            disabled={ending}
+            title="End this session"
+            className="text-[11px] font-medium px-2 py-1 rounded-md border border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-60 transition"
+          >
+            End
+          </button>
+        </div>
       ) : session.state === 'running' && session.status ? (
         <div className="px-3 py-1.5 text-[11px] text-gray-500 dark:text-zinc-400 border-t border-gray-100 dark:border-zinc-800 truncate">
           {session.status}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PropertyData, Listing } from '../types'
 import { saveProperties } from '../utils'
 
@@ -236,6 +236,22 @@ export default function Sidebar({
 function EndAllSessionsButton() {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
+  const [counts, setCounts] = useState<{ active: number; queued: number } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/sessions/count', { cache: 'no-store' })
+        if (!r.ok) return
+        const data = await r.json()
+        if (!cancelled) setCounts({ active: data.active ?? 0, queued: data.queued ?? 0 })
+      } catch {}
+    }
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
   const handleClick = async () => {
     if (busy) return
@@ -265,16 +281,30 @@ function EndAllSessionsButton() {
   }
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={busy}
-      title="Force-stop every active browser-use session on your account"
-      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-900/60 hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>
-      </svg>
-      {busy ? 'Ending sessions...' : result || 'End all sessions'}
-    </button>
+    <div className="w-full flex flex-col gap-1">
+      {counts && (
+        <div className="flex items-center gap-2 px-1 text-[11px] text-gray-500 dark:text-zinc-400 font-mono">
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+            {counts.active} active
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-zinc-500" />
+            {counts.queued} queued
+          </span>
+        </div>
+      )}
+      <button
+        onClick={handleClick}
+        disabled={busy}
+        title="Force-stop every active browser-use session on your account"
+        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-900/60 hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>
+        </svg>
+        {busy ? 'Ending sessions...' : result || 'End all sessions'}
+      </button>
+    </div>
   )
 }
