@@ -212,12 +212,26 @@ export default function SignInAccountsTab({ onImported }: Props) {
 
   const reparse = useCallback((text: string) => {
     setPasted(text)
+    try {
+      if (text.trim()) sessionStorage.setItem('signin_paste', text)
+      else sessionStorage.removeItem('signin_paste')
+    } catch {}
     if (!text.trim()) { setParsed([]); setParseErrors([]); return }
     const rows = parseRows(text)
     const { parsed, errors } = rowsToParsed(rows)
     setParsed(parsed)
     setParseErrors(errors)
   }, [])
+
+  // Rehydrate pasted creds from sessionStorage so Retry still works after a reload.
+  // sessionStorage is scoped to this tab and cleared when the tab closes — good
+  // enough for an internal tool, and avoids persisting passwords long-term.
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('signin_paste')
+      if (saved) reparse(saved)
+    } catch {}
+  }, [reparse])
 
   const updateSession = useCallback((id: string, patch: Partial<PostSession>) => {
     setSessions(prev => prev ? prev.map(s => s.id === id ? { ...s, ...patch } : s) : prev)
