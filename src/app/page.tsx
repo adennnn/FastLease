@@ -248,12 +248,6 @@ export default function LandingPage() {
           >
             Log In
           </a>
-          <a
-            href="/dashboard"
-            className="px-4 py-2 rounded-lg border border-black/15 dark:border-white/20 bg-black/[0.02] dark:bg-white/[0.03] text-black dark:text-white text-xs font-mono uppercase tracking-wider font-medium hover:bg-black/[0.05] dark:hover:bg-white/[0.08] transition"
-          >
-            Dashboard
-          </a>
         </div>
       </nav>
 
@@ -283,33 +277,10 @@ export default function LandingPage() {
               type="text"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-              onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
               placeholder="Enter a property address..."
               className="flex-1 px-4 py-3 text-sm font-mono outline-none bg-transparent placeholder:text-black/30 dark:placeholder:text-white/30 text-black dark:text-white"
             />
-            <button
-              onClick={handleSearch}
-              className="px-5 py-3 rounded-lg bg-[#3b82f6] text-white text-xs font-mono uppercase tracking-wider font-medium hover:bg-[#2563eb] transition"
-            >
-              Search
-            </button>
           </div>
-
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute z-50 w-full mt-2 rounded-lg bg-white dark:bg-[#111] border border-black/10 dark:border-white/10 max-h-64 overflow-y-auto shadow-lg">
-              {suggestions.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSelect(s)}
-                  className="w-full text-left px-4 py-3 hover:bg-black/5 dark:hover:bg-white/5 border-b border-black/5 dark:border-white/5 last:border-b-0 text-sm text-black/70 dark:text-white/70 font-mono"
-                >
-                  {s.display_name}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         <StatsBar />
