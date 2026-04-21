@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 
 /**
- * Returns counts of non-terminal BU sessions:
- *   active — session has a liveUrl (browser is connected and reachable)
- *   queued — session exists but has no liveUrl yet (still initializing, or live view lost)
- * Stopped / finished sessions are excluded from both counts.
+ * Returns counts of non-terminal BU sessions that actually have a running task:
+ *   active — session has a liveUrl AND at least one task with status 'started'
+ *   queued — session has a running task but no liveUrl yet (still initializing)
+ * Sessions with no running task (idle keep-alive browsers, stopped, finished)
+ * are excluded — see /api/sessions/active for the reasoning.
  */
 export async function GET() {
   const apiKey = process.env.BROWSER_USE_API_KEY
@@ -17,25 +18,44 @@ export async function GET() {
   const PAGE_SIZE = 100
   const MAX_PAGES = 20
 
-  let active = 0
-  let queued = 0
+  const sessionsById = new Map<string, { liveUrl: string | null }>()
+  const runningSessionIds = new Set<string>()
 
   try {
-    await Promise.all(
-      Array.from({ length: MAX_PAGES }, (_, i) => i + 1).map(async pageNumber => {
-        try {
-          const resp: any = await client.sessions.list({ pageSize: PAGE_SIZE, pageNumber })
-          const items: any[] = resp?.items || []
-          for (const s of items) {
-            if (s.finishedAt || s.status === 'stopped' || s.status === 'finished') continue
-            if (s.liveUrl) active++
-            else queued++
-          }
-        } catch {
-          // ignore per-page failures
-        }
-      }),
-    )
+    await Promise.all([
+      Promise.all(
+        Array.from({ length: MAX_PAGES }, (_, i) => i + 1).map(async pageNumber => {
+          try {
+            const resp: any = await client.sessions.list({ pageSize: PAGE_SIZE, pageNumber })
+            const items: any[] = resp?.items || []
+            for (const s of items) {
+              if (s.finishedAt || s.status === 'stopped' || s.status === 'finished') continue
+              if (sessionsById.has(s.id)) continue
+              sessionsById.set(s.id, { liveUrl: s.liveUrl ?? null })
+            }
+          } catch {}
+        }),
+      ),
+      Promise.all(
+        Array.from({ length: MAX_PAGES }, (_, i) => i + 1).map(async pageNumber => {
+          try {
+            const resp: any = await client.tasks.list({ pageSize: PAGE_SIZE, pageNumber, status: 'started' })
+            const items: any[] = resp?.items || []
+            for (const t of items) {
+              if (t.sessionId) runningSessionIds.add(t.sessionId)
+            }
+          } catch {}
+        }),
+      ),
+    ])
+
+    let active = 0
+    let queued = 0
+    for (const [id, s] of sessionsById) {
+      if (!runningSessionIds.has(id)) continue
+      if (s.liveUrl) active++
+      else queued++
+    }
 
     return NextResponse.json({ active, queued, total: active + queued })
   } catch (e: any) {

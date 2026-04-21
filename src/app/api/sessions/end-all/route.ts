@@ -33,6 +33,9 @@ export async function POST() {
       ),
     )
 
+    // Fire listing + stops but DON'T await the stops — as soon as BU has accepted
+    // the stop requests the user's intent is registered; we don't need to block
+    // the response waiting for BU to confirm each one.
     await Promise.all(
       Array.from({ length: MAX_PAGES }, (_, i) => i + 1).map(async pageNumber => {
         try {
@@ -50,11 +53,14 @@ export async function POST() {
       }),
     )
 
-    console.log(`[EndAll] Found ${seen.size} active session(s); awaiting stops...`)
-    await Promise.all(stopPromises)
-
-    console.log(`[EndAll] Stopped ${stopped.length}; ${failed.length} failed`)
-    return NextResponse.json({ stopped: stopped.length, failed, totalFound: seen.size })
+    console.log(`[EndAll] Found ${seen.size} session(s); stops fired (not awaited)`)
+    // Return immediately with the count of stops we *initiated*. Background the
+    // await so unhandled rejections don't crash the process.
+    Promise.all(stopPromises).then(
+      () => console.log(`[EndAll] Completed ${stopped.length}; ${failed.length} failed`),
+      () => {},
+    )
+    return NextResponse.json({ stopped: seen.size, failed: [], totalFound: seen.size })
   } catch (e: any) {
     console.error('[EndAll] Error:', e?.message)
     return NextResponse.json({ error: e?.message || 'Failed to end sessions', stopped: stopped.length, failed }, { status: 500 })

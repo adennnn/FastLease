@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PropertyData, Listing } from '../types'
 import { saveProperties } from '../utils'
 
@@ -31,6 +31,8 @@ interface SidebarProps {
   setShowWarmup: (v: boolean) => void
   showSignIn: boolean
   setShowSignIn: (v: boolean) => void
+  showLiveSessions: boolean
+  setShowLiveSessions: (v: boolean) => void
   setActiveListingView: (v: Listing | null) => void
   savedListings: Listing[]
   pinnedIds: string[]
@@ -49,6 +51,7 @@ export default function Sidebar({
   showListings, setShowListings,
   showWarmup, setShowWarmup,
   showSignIn, setShowSignIn,
+  showLiveSessions, setShowLiveSessions,
   setActiveListingView,
   savedListings, pinnedIds, togglePin, setShowSettings,
 }: SidebarProps) {
@@ -82,30 +85,34 @@ export default function Sidebar({
         </div>
         <div className="p-4 border-b border-gray-100 dark:border-zinc-800 space-y-1">
           <button
-            onClick={() => { setActiveProperty(null); setShowSearchView(true); setSearchAddress(''); setShowConfirm(false); setPendingProperty(null); setMapView(null); setShowListings(false); setActiveListingView(null); setShowDashboardTab(false); setShowWarmup(false); setShowSignIn(false) }}
+            onClick={() => { setActiveProperty(null); setShowSearchView(true); setSearchAddress(''); setShowConfirm(false); setPendingProperty(null); setMapView(null); setShowListings(false); setActiveListingView(null); setShowDashboardTab(false); setShowWarmup(false); setShowSignIn(false); setShowLiveSessions(false) }}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition ${!showDashboardTab && !showListings && !showWarmup && !showSignIn && !activeProperty ? 'bg-[var(--accent-light)] text-[var(--accent)] dark:bg-blue-500/15 dark:text-blue-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
             Find Property
           </button>
           <button
-            onClick={() => { setShowDashboardTab(true); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowListings(false); setActiveListingView(null); setShowWarmup(false); setShowSignIn(false) }}
+            onClick={() => { setShowDashboardTab(true); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowListings(false); setActiveListingView(null); setShowWarmup(false); setShowSignIn(false); setShowLiveSessions(false) }}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition ${showDashboardTab ? 'bg-[var(--accent-light)] text-[var(--accent)] dark:bg-blue-500/15 dark:text-blue-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
             Dashboard
           </button>
           <button
-            onClick={() => { setShowListings(true); setActiveListingView(null); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowDashboardTab(false); setShowWarmup(false); setShowSignIn(false) }}
+            onClick={() => { setShowListings(true); setActiveListingView(null); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowDashboardTab(false); setShowWarmup(false); setShowSignIn(false); setShowLiveSessions(false) }}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition ${showListings ? 'bg-[var(--accent-light)] text-[var(--accent)] dark:bg-blue-500/15 dark:text-blue-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
             Listings {savedListings.length > 0 ? `(${savedListings.length})` : ''}
           </button>
           <button
-            onClick={() => { setShowWarmup(true); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowListings(false); setActiveListingView(null); setShowDashboardTab(false); setShowSignIn(false) }}
+            onClick={() => { setShowWarmup(true); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowListings(false); setActiveListingView(null); setShowDashboardTab(false); setShowSignIn(false); setShowLiveSessions(false) }}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition ${showWarmup ? 'bg-[var(--accent-light)] text-[var(--accent)] dark:bg-blue-500/15 dark:text-blue-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
             Warm Accounts
           </button>
           <button
-            onClick={() => { setShowSignIn(true); setShowWarmup(false); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowListings(false); setActiveListingView(null); setShowDashboardTab(false) }}
+            onClick={() => { setShowSignIn(true); setShowWarmup(false); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowListings(false); setActiveListingView(null); setShowDashboardTab(false); setShowLiveSessions(false) }}
             className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition ${showSignIn ? 'bg-[var(--accent-light)] text-[var(--accent)] dark:bg-blue-500/15 dark:text-blue-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
             Sign In Accounts
           </button>
+          <LiveSessionsNavButton
+            active={showLiveSessions}
+            onClick={() => { setShowLiveSessions(true); setShowSignIn(false); setShowWarmup(false); setShowSearchView(false); setActiveProperty(null); setMapView(null); setShowConfirm(false); setShowListings(false); setActiveListingView(null); setShowDashboardTab(false) }}
+          />
         </div>
         <div className="flex-1 overflow-y-auto">
           {/* Pinned section */}
@@ -233,25 +240,96 @@ export default function Sidebar({
   )
 }
 
-function EndAllSessionsButton() {
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
+function LiveSessionsNavButton({ active, onClick }: { active: boolean; onClick: () => void }) {
   const [counts, setCounts] = useState<{ active: number; queued: number } | null>(null)
+  // Track IDs the user has told us to stop so we can exclude them from the
+  // displayed count until BU's listing reflects the stop. Without this the
+  // optimistic decrement flickers back as every 2s poll rediscovers the
+  // still-draining session.
+  const stoppedIdsRef = useRef<Set<string>>(new Set())
+  const endAllTsRef = useRef<number>(0)
 
   useEffect(() => {
     let cancelled = false
     const poll = async () => {
       try {
-        const r = await fetch('/api/sessions/count', { cache: 'no-store' })
+        const r = await fetch('/api/sessions/active', { cache: 'no-store' })
         if (!r.ok) return
         const data = await r.json()
-        if (!cancelled) setCounts({ active: data.active ?? 0, queued: data.queued ?? 0 })
+        if (cancelled) return
+        const items: { id: string; liveUrl: string | null }[] = data.items || []
+        // Drop stopped IDs BU no longer reports — stop has actually landed.
+        const reportedIds = new Set(items.map(s => s.id))
+        for (const id of stoppedIdsRef.current) {
+          if (!reportedIds.has(id)) stoppedIdsRef.current.delete(id)
+        }
+        // During the end-all grace window (15s after click) trust the user's
+        // "all stopped" intent even if BU still reports some — every session
+        // visible right now was requested-stopped.
+        const endAllWindow = Date.now() - endAllTsRef.current < 15000
+        if (endAllWindow) { setCounts({ active: 0, queued: 0 }); return }
+        const filtered = items.filter(s => !stoppedIdsRef.current.has(s.id))
+        const activeCount = filtered.filter(s => !!s.liveUrl).length
+        const queuedCount = filtered.length - activeCount
+        setCounts({ active: activeCount, queued: queuedCount })
       } catch {}
     }
     poll()
-    const id = setInterval(poll, 5000)
+    const id = setInterval(poll, 2000)
     return () => { cancelled = true; clearInterval(id) }
   }, [])
+
+  // Optimistic updates so the badge reacts instantly — poll reconciles.
+  useEffect(() => {
+    const onEnded = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { id?: string; delta?: number } | undefined
+      if (detail?.id) stoppedIdsRef.current.add(detail.id)
+      const delta = detail?.delta ?? 1
+      setCounts(prev => prev ? { ...prev, active: Math.max(0, prev.active - delta) } : prev)
+    }
+    const onEndAll = () => {
+      endAllTsRef.current = Date.now()
+      setCounts({ active: 0, queued: 0 })
+    }
+    window.addEventListener('sessionEnded', onEnded)
+    window.addEventListener('endAllSessions', onEndAll)
+    return () => {
+      window.removeEventListener('sessionEnded', onEnded)
+      window.removeEventListener('endAllSessions', onEndAll)
+    }
+  }, [])
+
+  const total = (counts?.active ?? 0) + (counts?.queued ?? 0)
+  const hasLive = (counts?.active ?? 0) > 0
+
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-between gap-2 ${active ? 'bg-[var(--accent-light)] text-[var(--accent)] dark:bg-blue-500/15 dark:text-blue-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}
+    >
+      <span className="flex items-center gap-2">
+        {hasLive ? (
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+          </span>
+        ) : (
+          <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-zinc-600" />
+        )}
+        Live Sessions
+      </span>
+      {total > 0 && (
+        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${hasLive ? 'bg-red-500/10 text-red-500' : 'bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400'}`}>
+          {total}
+        </span>
+      )}
+    </button>
+  )
+}
+
+function EndAllSessionsButton() {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
 
   const handleClick = async () => {
     if (busy) return
@@ -281,30 +359,16 @@ function EndAllSessionsButton() {
   }
 
   return (
-    <div className="w-full flex flex-col gap-1">
-      {counts && (
-        <div className="flex items-center gap-2 px-1 text-[11px] text-gray-500 dark:text-zinc-400 font-mono">
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            {counts.active} active
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-zinc-500" />
-            {counts.queued} queued
-          </span>
-        </div>
-      )}
-      <button
-        onClick={handleClick}
-        disabled={busy}
-        title="Force-stop every active browser-use session on your account"
-        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-900/60 hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>
-        </svg>
-        {busy ? 'Ending sessions...' : result || 'End all sessions'}
-      </button>
-    </div>
+    <button
+      onClick={handleClick}
+      disabled={busy}
+      title="Force-stop every active browser-use session on your account"
+      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-900/60 hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>
+      </svg>
+      {busy ? 'Ending sessions...' : result || 'End all sessions'}
+    </button>
   )
 }

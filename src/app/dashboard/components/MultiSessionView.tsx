@@ -76,6 +76,7 @@ function SessionTile({ session, onRetry, onConnected, successLabel, successLinkL
   const stopBU = async (sessionId: string) => {
     if (stopAttemptedRef.current) return
     stopAttemptedRef.current = true
+    window.dispatchEvent(new CustomEvent('sessionEnded', { detail: { id: sessionId, delta: 1 } }))
     try {
       await fetch('/api/sessions/stop', {
         method: 'POST',

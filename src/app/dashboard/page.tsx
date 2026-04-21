@@ -12,6 +12,7 @@ import GenerateListingFlow, { UnitDraft, PostSession } from './components/Genera
 import MultiSessionView from './components/MultiSessionView'
 import WarmAccountsTab from './components/WarmAccountsTab'
 import SignInAccountsTab from './components/SignInAccountsTab'
+import LiveSessionsTab from './components/LiveSessionsTab'
 import SettingsPage from './components/SettingsPage'
 import { readSSEStream } from '@/hooks/useSSEStream'
 
@@ -50,6 +51,7 @@ export default function Dashboard() {
   const [showDashboardTab, setShowDashboardTab] = useState(false)
   const [showWarmup, setShowWarmup] = useState(false)
   const [showSignIn, setShowSignIn] = useState(false)
+  const [showLiveSessions, setShowLiveSessions] = useState(false)
   const [pinnedIds, setPinnedIds] = useState<string[]>([])
   const [toast, setToast] = useState('')
   const [errorToast, setErrorToast] = useState('')
@@ -569,6 +571,11 @@ export default function Dashboard() {
       return <SignInAccountsTab />
     }
 
+    // Live Sessions tab
+    if (showLiveSessions) {
+      return <LiveSessionsTab />
+    }
+
     // Listings view
     if (showListings) {
       return (
@@ -662,6 +669,8 @@ export default function Dashboard() {
         setShowWarmup={setShowWarmup}
         showSignIn={showSignIn}
         setShowSignIn={setShowSignIn}
+        showLiveSessions={showLiveSessions}
+        setShowLiveSessions={setShowLiveSessions}
         setActiveListingView={setActiveListingView}
         savedListings={savedListings}
         pinnedIds={pinnedIds}
