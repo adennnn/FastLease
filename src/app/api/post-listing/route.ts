@@ -74,27 +74,67 @@ export async function POST(req: NextRequest) {
       sse.send('status', { message: 'Connecting to browser session...' })
       console.log(`[PostListing] Using persistent profile: ${profileId}, workspace: ${workspaceId}, images: ${imageFiles.length}`)
 
-      const runPromise = client.run(prompt, {
+      const runOpts = {
         model: 'claude-opus-4.6' as any,
         maxCostUsd: 7.00,
         proxyCountryCode: 'us',
         timeout: 1800000,
         profileId,
         ...(workspaceId ? { workspaceId } : {}),
-      })
+      }
 
-      pollLiveUrl({
-        client,
-        runPromise,
-        sse,
-        maxAttempts: 60,
-        onSessionId: (sid) => { sessionId = sid },
-      })
+      // BU throws TooManyConcurrentActiveSessionsError (429) when the plan's
+      // concurrency limit is hit. Kicking off ~13 posts in parallel exceeds
+      // the limit and silently drops the overflow — retry with backoff so
+      // every posting eventually runs as capacity frees up.
+      const MAX_CONCURRENCY_ATTEMPTS = 20
+      let output = ''
+      let isTaskSuccessful: boolean | null | undefined = null
+      let statusValue = ''
+      for (let attempt = 0; ; attempt++) {
+        const runPromise = client.run(prompt, runOpts)
+        pollLiveUrl({
+          client,
+          runPromise,
+          sse,
+          maxAttempts: 60,
+          onSessionId: (sid) => { sessionId = sid },
+        })
+        try {
+          const result = await runPromise
+          output = result.output || ''
+          isTaskSuccessful = result.isTaskSuccessful
+          statusValue = result.status || ''
+          break
+        } catch (err: any) {
+          const detailStr = typeof err?.detail === 'string' ? err.detail : JSON.stringify(err?.detail ?? '')
+          const combined = `${err?.message || ''} ${detailStr}`
+          const isConcurrency = err?.statusCode === 429 || /concurrent|too many/i.test(combined)
+          if (isConcurrency && attempt < MAX_CONCURRENCY_ATTEMPTS - 1) {
+            const waitSec = Math.min(20 + attempt * 5, 60)
+            console.log(`[PostListing] Concurrency limit hit (attempt ${attempt + 1}/${MAX_CONCURRENCY_ATTEMPTS}), waiting ${waitSec}s: ${err?.message}`)
+            sse.send('status', { message: `Waiting for capacity… (retry in ${waitSec}s)` })
+            await new Promise(r => setTimeout(r, waitSec * 1000))
+            sessionId = null
+            continue
+          }
+          // Non-concurrency failure — BU often aborts the runPromise when a
+          // session is stopped externally (cleanup, End-all, BU-side stop) even
+          // though the agent already posted and captured a URL. Recover the
+          // final output from the session before giving up.
+          if (!sessionId) throw err
+          console.log(`[PostListing] run aborted (${err?.message}); recovering from session ${sessionId}`)
+          const session: any = await client.sessions.get(sessionId).catch(() => null)
+          if (!session) throw err
+          const sessionOutput = typeof session.output === 'string' ? session.output : ''
+          output = sessionOutput || (typeof session.lastStepSummary === 'string' ? session.lastStepSummary : '')
+          isTaskSuccessful = session.isTaskSuccessful ?? null
+          statusValue = session.status || 'stopped'
+          break
+        }
+      }
 
-      const result = await runPromise
-      const output = result.output || ''
-      const isTaskSuccessful = result.isTaskSuccessful
-      console.log(`[PostListing] Browser Use status: ${result.status}, isTaskSuccessful: ${isTaskSuccessful}, output: ${output.substring(0, 500)}`)
+      console.log(`[PostListing] Browser Use status: ${statusValue}, isTaskSuccessful: ${isTaskSuccessful}, output: ${output.substring(0, 500)}`)
 
       const listingUrlMatch = output.match(/https?:\/\/(?:www\.)?facebook\.com\/marketplace\/item\/\d+/i)
         || output.match(/https?:\/\/(?:www\.)?facebook\.com\/[^\s"'<>]+/i)
@@ -103,11 +143,17 @@ export async function POST(req: NextRequest) {
       const agentReportedFailure = isTaskSuccessful === false && output && !output.includes('Task ended unexpectedly')
       const realFailure = agentReportedFailure && !listingUrl
 
-      if (realFailure) {
+      if (listingUrl) {
+        // A captured marketplace URL is ground truth — the post is live,
+        // regardless of BU's status (stopped/aborted/etc).
+        sse.send('result', { success: true, output, listingUrl })
+      } else if (realFailure) {
         const shortOutput = (output || '').substring(0, 300)
         sse.send('error', { error: `Posting failed: ${shortOutput || 'the agent could not complete the task'}` })
+      } else if (statusValue === 'stopped' || statusValue === 'failed') {
+        sse.send('error', { error: 'Session stopped before the listing finished posting' })
       } else {
-        sse.send('result', { success: true, output, listingUrl })
+        sse.send('result', { success: true, output, listingUrl: null })
       }
     } catch (error: any) {
       console.error('[PostListing] Error:', error.message)
