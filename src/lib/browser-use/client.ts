@@ -37,14 +37,22 @@ function getApiKey(): string {
 
 const runtimeRequire = eval('require') as NodeRequire
 
+/**
+ * Default BU SDK retries 429s three times with 1-10s backoff. When firing ~50
+ * sessions at once we hit BU's API rate limit hard enough that three isn't
+ * enough — bump so the SDK rides out the burst before surfacing an error to
+ * our route-level retry loop.
+ */
+const BU_MAX_RETRIES = 6
+
 /** v3 SDK — has workspaces + sessions but NOT profiles. */
 export function createClientV3(): BrowserUseClient {
   const { BrowserUse } = runtimeRequire('browser-use-sdk/v3')
-  return new BrowserUse({ apiKey: getApiKey() }) as BrowserUseClient
+  return new BrowserUse({ apiKey: getApiKey(), maxRetries: BU_MAX_RETRIES }) as BrowserUseClient
 }
 
 /** Root SDK — has profiles + tasks but workspaces live under v3. */
 export function createClientRoot(): BrowserUseClient {
   const { BrowserUse } = runtimeRequire('browser-use-sdk')
-  return new BrowserUse({ apiKey: getApiKey() }) as BrowserUseClient
+  return new BrowserUse({ apiKey: getApiKey(), maxRetries: BU_MAX_RETRIES }) as BrowserUseClient
 }

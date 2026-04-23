@@ -4,7 +4,10 @@ import { createClientV3 } from '@/lib/browser-use/client'
 import { createSSEStream } from '@/lib/browser-use/sse-stream'
 import { createAndUpload, deleteWorkspace } from '@/lib/browser-use/workspace'
 import { pollLiveUrl } from '@/lib/browser-use/poll-live-url'
+import { acquireSessionSlot, releaseSessionSlot, getGateStats } from '@/lib/browser-use/concurrency-gate'
 import { buildPostListingPrompt } from '@/lib/prompts/post-listing'
+
+export const maxDuration = 1800
 
 async function fetchImageBuffers(
   urls: string[],
@@ -37,6 +40,7 @@ export async function POST(req: NextRequest) {
     const client = createClientV3()
     let sessionId: string | null = null
     let workspaceId: string | null = null
+    let slotHeld = false
 
     try {
       // Upload images to workspace
@@ -71,8 +75,19 @@ export async function POST(req: NextRequest) {
         imageFiles: imageFiles.map(f => ({ name: f.name })),
       })
 
+      // Wait for a BU concurrency slot before kicking off the run. When the
+      // user fires 50 posts simultaneously, this queues the overflow in memory
+      // instead of hammering BU with requests that are guaranteed to 429.
+      const gatePre = getGateStats()
+      if (gatePre.inFlight >= gatePre.limit) {
+        sse.send('status', { message: `Queued — ${gatePre.waiting + 1} ahead, waiting for capacity (limit ${gatePre.limit})` })
+        console.log(`[PostListing] Gate full (${gatePre.inFlight}/${gatePre.limit}, ${gatePre.waiting} waiting) — queuing`)
+      }
+      await acquireSessionSlot()
+      slotHeld = true
+
       sse.send('status', { message: 'Connecting to browser session...' })
-      console.log(`[PostListing] Using persistent profile: ${profileId}, workspace: ${workspaceId}, images: ${imageFiles.length}`)
+      console.log(`[PostListing] Using persistent profile: ${profileId}, workspace: ${workspaceId}, images: ${imageFiles.length}, slot ${getGateStats().inFlight}/${getGateStats().limit}`)
 
       const runOpts = {
         model: 'claude-opus-4.6' as any,
@@ -109,10 +124,12 @@ export async function POST(req: NextRequest) {
         } catch (err: any) {
           const detailStr = typeof err?.detail === 'string' ? err.detail : JSON.stringify(err?.detail ?? '')
           const combined = `${err?.message || ''} ${detailStr}`
-          const isConcurrency = err?.statusCode === 429 || /concurrent|too many/i.test(combined)
+          const statusCode = err?.statusCode
+          const isConcurrency = statusCode === 429 || statusCode === 403 || /concurrent|too many|rate.?limit|capacity/i.test(combined)
+          console.log(`[PostListing] run rejected — statusCode=${statusCode}, message="${err?.message}", detail=${detailStr.slice(0, 200)}, isConcurrency=${isConcurrency}`)
           if (isConcurrency && attempt < MAX_CONCURRENCY_ATTEMPTS - 1) {
             const waitSec = Math.min(20 + attempt * 5, 60)
-            console.log(`[PostListing] Concurrency limit hit (attempt ${attempt + 1}/${MAX_CONCURRENCY_ATTEMPTS}), waiting ${waitSec}s: ${err?.message}`)
+            console.log(`[PostListing] Concurrency limit hit (attempt ${attempt + 1}/${MAX_CONCURRENCY_ATTEMPTS}), waiting ${waitSec}s`)
             sse.send('status', { message: `Waiting for capacity… (retry in ${waitSec}s)` })
             await new Promise(r => setTimeout(r, waitSec * 1000))
             sessionId = null
@@ -165,6 +182,7 @@ export async function POST(req: NextRequest) {
       }
       sse.send('error', { error: error.message || 'Failed to post listing' })
     } finally {
+      if (slotHeld) releaseSessionSlot()
       await deleteWorkspace(client, workspaceId)
     }
   })
