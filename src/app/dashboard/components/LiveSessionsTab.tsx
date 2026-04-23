@@ -19,15 +19,17 @@ export default function LiveSessionsTab() {
 
   const fetchList = useCallback(async (opts?: { force?: boolean }) => {
     try {
-      const r = await fetch('/api/sessions/active', { cache: 'no-store' })
+      // Force = show whatever BU returns, no staleness filter, no local
+      // suppression. Used by the Refresh button so the user can always see
+      // BU ground truth.
+      const url = opts?.force ? '/api/sessions/active?all=1' : '/api/sessions/active'
+      const r = await fetch(url, { cache: 'no-store' })
       const data = await r.json()
       if (!r.ok) {
         setError(data.error || 'Failed to load sessions')
         return
       }
       const fresh: ActiveSession[] = data.items || []
-      // Force = show whatever BU returns, no local suppression. Used by the
-      // Refresh button so the user can always see ground truth.
       if (opts?.force) stoppedRef.current.clear()
       setItems(fresh.filter(s => !stoppedRef.current.has(s.id)))
       setError(null)
@@ -40,7 +42,6 @@ export default function LiveSessionsTab() {
   const forceRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await fetch('/api/sessions/cleanup', { method: 'POST' }).catch(() => {})
       await fetchList({ force: true })
     } finally {
       setRefreshing(false)

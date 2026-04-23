@@ -1,4 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, NextRequest } from 'next/server'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 /**
  * Returns every BU session on the account that still has a *running* task.
@@ -6,14 +9,21 @@ import { NextResponse } from 'next/server'
  * browser is still spun up — even if the agent finished long ago. To match
  * the user's intuition ("is something actually happening?") we cross-reference
  * with the tasks API and only count a session as active if at least one of
- * its tasks has TaskStatus === 'started' AND started within the last
- * STALE_TASK_MS. Anything older is a zombie (agent crashed, task stuck in
- * BU state machine) and is both hidden from the dashboard and force-stopped
- * in the background so BU capacity frees up for real postings.
+ * its tasks has TaskStatus === 'started'.
+ *
+ * Query params:
+ *   ?all=1 — skip the staleness filter and return every live-task session,
+ *            no matter how long it's been running. Used by the Refresh
+ *            button so the user always sees BU ground truth.
+ *
+ * Without ?all=1, tasks 'started' for longer than STALE_TASK_MS are treated
+ * as zombies and hidden — legitimate FB posts finish well under this, so
+ * anything older has crashed/stuck.
  */
-const STALE_TASK_MS = 10 * 60 * 1000
+const STALE_TASK_MS = 15 * 60 * 1000
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const showAll = req.nextUrl.searchParams.get('all') === '1'
   const apiKey = process.env.BROWSER_USE_API_KEY
   if (!apiKey) return NextResponse.json({ error: 'BROWSER_USE_API_KEY not set' }, { status: 500 })
 
@@ -38,8 +48,7 @@ export async function GET() {
 
   const byId = new Map<string, Item>()
   // sessionId → most-recent task startedAt timestamp for that session.
-  const freshTaskBySession = new Map<string, number>()
-  const staleSessionIds = new Set<string>()
+  const taskStartedBySession = new Map<string, number>()
 
   try {
     await Promise.all([
@@ -74,12 +83,8 @@ export async function GET() {
               if (!t.sessionId) continue
               const ts = t.startedAt ? Date.parse(t.startedAt) : (t.createdAt ? Date.parse(t.createdAt) : 0)
               if (!ts) continue
-              if (now - ts > STALE_TASK_MS) {
-                staleSessionIds.add(t.sessionId)
-              } else {
-                const prev = freshTaskBySession.get(t.sessionId) ?? 0
-                if (ts > prev) freshTaskBySession.set(t.sessionId, ts)
-              }
+              const prev = taskStartedBySession.get(t.sessionId) ?? 0
+              if (ts > prev) taskStartedBySession.set(t.sessionId, ts)
             }
           } catch {}
         }),
@@ -87,38 +92,29 @@ export async function GET() {
     ])
 
     for (const s of byId.values()) {
-      const fresh = freshTaskBySession.get(s.id)
-      if (fresh) {
+      const ts = taskStartedBySession.get(s.id)
+      if (ts) {
         s.hasRunningTask = true
-        s.taskStartedAt = fresh
+        s.taskStartedAt = ts
       }
-    }
-
-    // Fire-and-forget: stop any session whose only running tasks are stale.
-    // This keeps BU capacity from being held hostage by zombies between
-    // explicit Refresh clicks.
-    const toStop: string[] = []
-    for (const sid of staleSessionIds) {
-      if (!freshTaskBySession.has(sid)) toStop.push(sid)
-    }
-    if (toStop.length > 0) {
-      Promise.all(toStop.map(id => client.sessions.stop(id).catch(() => {}))).catch(() => {})
     }
 
     const items = Array.from(byId.values())
       .filter(s => s.hasRunningTask)
+      .filter(s => showAll || (now - s.taskStartedAt) <= STALE_TASK_MS)
       .sort((a, b) => b.taskStartedAt - a.taskStartedAt)
       .map(({ taskStartedAt, ...rest }) => rest)
 
     const active = items.filter(s => !!s.liveUrl).length
     const queued = items.length - active
+    const withRunning = Array.from(byId.values()).filter(s => s.hasRunningTask).length
     return NextResponse.json({
       items,
       active,
       queued,
       total: items.length,
-      idleSessions: byId.size - items.length,
-      zombiesReaped: toStop.length,
+      idleSessions: byId.size - withRunning,
+      hiddenZombies: withRunning - items.length,
     })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Failed to list sessions' }, { status: 500 })
