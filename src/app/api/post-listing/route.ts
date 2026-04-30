@@ -7,7 +7,7 @@ import { pollLiveUrl } from '@/lib/browser-use/poll-live-url'
 import { acquireSessionSlot, releaseSessionSlot, getGateStats } from '@/lib/browser-use/concurrency-gate'
 import { buildPostListingPrompt } from '@/lib/prompts/post-listing'
 
-export const maxDuration = 1800
+export const maxDuration = 300
 
 async function fetchImageBuffers(
   urls: string[],
