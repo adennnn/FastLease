@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
       ),
     ])
 
-    for (const s of byId.values()) {
+    for (const s of Array.from(byId.values())) {
       const ts = taskStartedBySession.get(s.id)
       if (ts) {
         s.hasRunningTask = true
