@@ -172,11 +172,23 @@ export default function WarmAccountsTab() {
       setLoadingProfiles(false)
     }
     fetch('/api/profiles')
-      .then(r => r.json())
-      .then(d => {
-        const fresh = Array.isArray(d.profiles) ? d.profiles : []
-        setProfiles(fresh)
-        saveProfilesCache(fresh)
+      .then(async r => {
+        const d = await r.json().catch(() => ({}))
+        // Only commit a fresh profiles list when the server actually returned
+        // one. If BU rate-limits us (429) or otherwise errors, `d.profiles`
+        // will be undefined — DO NOT clobber the cached profiles to `[]` in
+        // that case. The user will keep seeing their accounts and a toast
+        // explains why we couldn't refresh.
+        if (Array.isArray(d.profiles)) {
+          setProfiles(d.profiles)
+          saveProfilesCache(d.profiles)
+        } else if (!r.ok) {
+          if (d.code === 'RATE_LIMITED' || r.status === 429) {
+            showToast('Browser-use is rate-limiting your account — showing cached accounts. Wait ~30s and reload.', 'info')
+          } else {
+            showToast(`Could not refresh accounts: ${d.error || `HTTP ${r.status}`}`, 'error')
+          }
+        }
       })
       .catch(() => { if (!cached) setProfiles([]) })
       .finally(() => setLoadingProfiles(false))
@@ -571,6 +583,16 @@ export default function WarmAccountsTab() {
         throw new Error(typeof e === 'string' ? e : JSON.stringify(e || body))
       }
       const info = await res.json()
+      // Sync also extracts the canonical FB profile URL — save it next to the
+      // others so the "Profile URL" column lights up after a sync without the
+      // user needing a separate fetch-profile-url round-trip.
+      if (info.profileUrl) {
+        setProfileUrlsState(cur => {
+          const next = { ...cur, [id]: info.profileUrl }
+          saveProfileUrls(next)
+          return next
+        })
+      }
       setData(d => {
         const cur = d[id] ?? emptyData()
         return {
@@ -671,43 +693,7 @@ export default function WarmAccountsTab() {
     }
   }
 
-  // ─── Editor view ────────────────────────────────────────────────────────
-  if (editingId) {
-    const profile = profiles.find(p => p.id === editingId)
-    if (!profile) {
-      setEditingId(null)
-      return null
-    }
-    const d = data[editingId] ?? emptyData()
-    const isGenerating = generating.has(editingId)
-    const status = getStatus(profile, data[editingId], sessions[editingId], warmedOverride)
-    const warm = isWarmForProfile(profile, warmedOverride)
-    return (
-      <>
-        <AccountEditor
-          profile={profile}
-          data={d}
-          status={status}
-          isWarm={warm}
-          isGenerating={isGenerating}
-          profileUrl={profileUrls[editingId] || ''}
-          fetchingProfileUrl={fetchingUrl.has(editingId)}
-          onUpdate={patch => updateData(editingId, patch)}
-          onUpdateProfileUrl={url => updateProfileUrl(editingId, url)}
-          onRefetchProfileUrl={() => fetchProfileUrl(editingId)}
-          onToggleWarm={next => toggleWarm(editingId, next)}
-          onGenerateIdentity={() => generateIdentity(editingId)}
-          onRegenerateFace={type => regenerateFace(editingId, type)}
-          onDone={() => setEditingId(null)}
-          onStartNow={() => { runWarmup(editingId); setEditingId(null) }}
-        />
-        <ToastStack toasts={toasts} onDismiss={id => setToasts(t => t.filter(x => x.id !== id))} />
-        <ConfirmModal request={confirmRequest} onClose={() => setConfirmRequest(null)} />
-      </>
-    )
-  }
-
-  // ─── Spreadsheet view ───────────────────────────────────────────────────
+  // ─── Spreadsheet view with inline expandable drawers ─────────────────────
   // Visible set respects the hidden-accounts filter (unless the user toggled
   // Show hidden on). Warmed accounts drop to the bottom of the visible list.
   const visibleProfiles = showHidden
@@ -726,11 +712,12 @@ export default function WarmAccountsTab() {
   const warmCount = statuses.filter(s => s === 'warm').length
   const hiddenCount = Object.keys(hiddenOverride).filter(id => profiles.some(p => p.id === id)).length
 
-  // One grid template shared between the header and every body row so columns
-  // stay perfectly aligned. Photo cell is a fixed-size square. Bio and
-  // Attachments both flex (1fr) so they split the remaining width evenly —
-  // attachments = list of posts/photos currently live on FB that need cleanup.
-  const ROW_COLS = 'grid-cols-[160px_240px_1fr_1fr_200px_140px_140px_40px]'
+  // Four content columns + expand chevron. Status/Actions/Hide/Profile-URL/
+  // Browser-use all moved INTO the expanded panel that unfolds below a row —
+  // the row itself is now just "what's currently live on this profile" with
+  // a click-to-expand affordance. Photo is big (208px) so the live profile
+  // picture reads clearly at a glance.
+  const ROW_COLS = 'grid-cols-[208px_260px_1fr_1fr_56px]'
 
   return (
     <div className="w-full h-full overflow-y-auto">
@@ -825,49 +812,74 @@ export default function WarmAccountsTab() {
         )}
         {!loadingProfiles && sortedProfiles.length > 0 && (
           <div className="rounded-xl border border-gray-200 dark:border-zinc-800 overflow-x-auto bg-white dark:bg-zinc-900/50">
-            <div className="min-w-[1400px]">
+            <div className="min-w-[1000px]">
               {/* Header row */}
               <div className={`grid ${ROW_COLS} border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900/70 text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-zinc-400 sticky top-0 z-10`}>
                 <div className="px-4 py-3">Photo</div>
                 <div className="px-4 py-3 border-l border-gray-200 dark:border-zinc-800">Identity</div>
                 <div className="px-4 py-3 border-l border-gray-200 dark:border-zinc-800">Bio</div>
-                <div className="px-4 py-3 border-l border-gray-200 dark:border-zinc-800">Live posts to clean</div>
-                <div className="px-4 py-3 border-l border-gray-200 dark:border-zinc-800">Profile URL</div>
-                <div className="px-4 py-3 border-l border-gray-200 dark:border-zinc-800">Status</div>
-                <div className="px-4 py-3 border-l border-gray-200 dark:border-zinc-800">Actions</div>
+                <div className="px-4 py-3 border-l border-gray-200 dark:border-zinc-800">Live posts on profile</div>
                 <div className="px-2 py-3 border-l border-gray-200 dark:border-zinc-800" />
               </div>
 
-              {/* Body rows */}
+              {/* Body rows + inline expanded drawer */}
               {sortedProfiles.map(p => {
                 const d = data[p.id]
                 const customName = [d?.firstName, d?.lastName].filter(Boolean).join(' ').trim()
                 const displayName = customName || stripProfileSuffix(p.name)
+                const status = getStatus(p, d, sessions[p.id], warmedOverride)
+                const warm = isWarmForProfile(p, warmedOverride)
+                const expanded = editingId === p.id
+                const hideAction = () => setConfirmRequest({
+                  title: 'Hide account?',
+                  body: `"${displayName}" will be removed from this view. This does not delete the browser-use profile — you can restore it later with the "Show hidden" toggle.`,
+                  confirmLabel: 'Hide',
+                  destructive: true,
+                  onConfirm: () => { setHidden(p.id, true); if (editingId === p.id) setEditingId(null) },
+                })
                 return (
-                  <AccountRow
-                    key={p.id}
-                    cols={ROW_COLS}
-                    profile={p}
-                    data={d}
-                    status={getStatus(p, d, sessions[p.id], warmedOverride)}
-                    session={sessions[p.id]}
-                    profileUrl={profileUrls[p.id]}
-                    isGenerating={generating.has(p.id)}
-                    isSyncing={syncing.has(p.id)}
-                    isHidden={!!hiddenOverride[p.id]}
-                    onEdit={() => setEditingId(p.id)}
-                    onStart={() => runWarmup(p.id)}
-                    onGenerate={() => generateIdentity(p.id)}
-                    onSync={() => { void syncOne(p.id) }}
-                    onHide={() => setConfirmRequest({
-                      title: 'Hide account?',
-                      body: `"${displayName}" will be removed from this view. This does not delete the browser-use profile — you can restore it later with the "Show hidden" toggle.`,
-                      confirmLabel: 'Hide',
-                      destructive: true,
-                      onConfirm: () => setHidden(p.id, true),
-                    })}
-                    onUnhide={() => setHidden(p.id, false)}
-                  />
+                  <div key={p.id}>
+                    <AccountRow
+                      cols={ROW_COLS}
+                      profile={p}
+                      data={d}
+                      status={status}
+                      session={sessions[p.id]}
+                      isGenerating={generating.has(p.id)}
+                      isSyncing={syncing.has(p.id)}
+                      isHidden={!!hiddenOverride[p.id]}
+                      expanded={expanded}
+                      onToggleExpand={() => setEditingId(cur => cur === p.id ? null : p.id)}
+                      onSync={() => { void syncOne(p.id) }}
+                    />
+                    {expanded && (
+                      <div className="border-b border-gray-200 dark:border-zinc-800 bg-gray-50/60 dark:bg-zinc-900/60">
+                        <AccountEditor
+                          variant="inline"
+                          profile={p}
+                          data={d ?? emptyData()}
+                          status={status}
+                          isWarm={warm}
+                          isGenerating={generating.has(p.id)}
+                          isSyncing={syncing.has(p.id)}
+                          isHidden={!!hiddenOverride[p.id]}
+                          profileUrl={profileUrls[p.id] || ''}
+                          fetchingProfileUrl={fetchingUrl.has(p.id)}
+                          onUpdate={patch => updateData(p.id, patch)}
+                          onUpdateProfileUrl={url => updateProfileUrl(p.id, url)}
+                          onRefetchProfileUrl={() => fetchProfileUrl(p.id)}
+                          onToggleWarm={next => toggleWarm(p.id, next)}
+                          onGenerateIdentity={() => generateIdentity(p.id)}
+                          onRegenerateFace={type => regenerateFace(p.id, type)}
+                          onSync={() => { void syncOne(p.id) }}
+                          onHide={hideAction}
+                          onUnhide={() => setHidden(p.id, false)}
+                          onDone={() => setEditingId(null)}
+                          onStartNow={() => runWarmup(p.id)}
+                        />
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -1170,6 +1182,24 @@ const AccountRow = memo(function AccountRow({
         ) : (
           <span className="text-xs text-gray-300 dark:text-zinc-700 select-none">—</span>
         )}
+      </div>
+
+      {/* Browser-use profile cell — opens the profile page in the BU cloud
+          dashboard (where you can see saved cookies, recent sessions, etc).
+          Always present since every row in this table corresponds to a real
+          BU profile with a real id. */}
+      <div className={`${cell} justify-center`}>
+        <a
+          href={`https://cloud.browser-use.com/profiles/${profile.id}`}
+          onClick={stop}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline truncate"
+          title={`Open profile ${profile.id} in browser-use dashboard`}
+        >
+          View profile
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17L17 7M17 7H8M17 7v9"/></svg>
+        </a>
       </div>
 
       {/* Status cell — badge + running/error detail line */}

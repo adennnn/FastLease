@@ -39,14 +39,18 @@ export default function ListingsPage({
 
   useEffect(() => {
     // Instant render from cache; refresh in background (see utils.ts).
+    // Only overwrite cache + state when the response actually carries
+    // profiles — a 429/500 returning {error:...} would otherwise blow
+    // the visible list to empty (see "all my accounts disappeared" bug).
     const cached = getProfilesCache()
     if (cached && cached.length > 0) setProfiles(cached)
     fetch('/api/profiles')
-      .then(r => r.json())
-      .then(d => {
-        const fresh = Array.isArray(d.profiles) ? d.profiles : []
-        setProfiles(fresh)
-        saveProfilesCache(fresh)
+      .then(async r => {
+        const d = await r.json().catch(() => ({}))
+        if (Array.isArray(d.profiles)) {
+          setProfiles(d.profiles)
+          saveProfilesCache(d.profiles)
+        }
       })
       .catch(() => {})
     setProfileUrls(getProfileUrls())

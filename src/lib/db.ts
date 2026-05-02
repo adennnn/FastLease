@@ -33,6 +33,14 @@ export interface Unit {
   status: string
 }
 
+export interface BrowserbaseAccount {
+  id: string
+  browserbaseContextId: string
+  buProfileId?: string
+  label?: string
+  createdAt: string
+}
+
 export interface Lead {
   id: string
   propertyId: string
@@ -49,6 +57,7 @@ export interface Lead {
 const managers: Map<string, LeasingManager> = new Map()
 const properties: Map<string, Property> = new Map()
 const leads: Map<string, Lead> = new Map()
+const browserbaseAccounts: Map<string, BrowserbaseAccount> = new Map()
 
 export const db = {
   managers: {
@@ -73,5 +82,18 @@ export const db = {
     get: (id: string) => leads.get(id),
     getAll: () => Array.from(leads.values()),
     getByProperty: (propertyId: string) => Array.from(leads.values()).filter(l => l.propertyId === propertyId),
+  },
+  browserbaseAccounts: {
+    create: (a: BrowserbaseAccount) => { browserbaseAccounts.set(a.id, a); return a },
+    get: (id: string) => browserbaseAccounts.get(id),
+    getAll: () => Array.from(browserbaseAccounts.values()),
+    update: (id: string, data: Partial<BrowserbaseAccount>) => {
+      const existing = browserbaseAccounts.get(id)
+      if (!existing) return null
+      const updated = { ...existing, ...data }
+      browserbaseAccounts.set(id, updated)
+      return updated
+    },
+    delete: (id: string) => browserbaseAccounts.delete(id),
   },
 }

@@ -225,10 +225,16 @@ export default function GenerateListingFlow({
     } else {
       setProfilesLoading(true)
     }
-    fetch('/api/profiles').then(r => r.json()).then(d => {
-      const fresh = Array.isArray(d.profiles) ? d.profiles : []
-      setProfiles(fresh)
-      saveProfilesCache(fresh)
+    fetch('/api/profiles').then(async r => {
+      const d = await r.json().catch(() => ({}))
+      // Same rate-limit safety as WarmAccountsTab: only commit a fresh list
+      // when the server actually returned one. If BU 429s us, `d.profiles`
+      // will be undefined — DO NOT clobber the cached profiles to `[]` then.
+      if (Array.isArray(d.profiles)) {
+        setProfiles(d.profiles)
+        saveProfilesCache(d.profiles)
+      }
+      // else: keep whatever cached profiles (if any) we already showed
     }).catch(() => { if (!cached) setProfiles([]) }).finally(() => setProfilesLoading(false))
   }, [listingFlow])
 

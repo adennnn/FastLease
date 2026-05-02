@@ -290,10 +290,16 @@ export function getProfilesCache(): CachedProfile[] | null {
 
 export function saveProfilesCache(profiles: CachedProfile[] | null) {
   try {
-    if (!profiles || profiles.length === 0) {
+    // Only an EXPLICIT null wipes the cache. An empty array is almost always
+    // a degraded fetch (server returned {} or {error:...} instead of
+    // {profiles:[...]}, and the caller defaulted `[]`) — wiping in that case
+    // is what caused the "all my accounts disappeared" bug after a 429.
+    // A real "user has zero profiles" state is harmless to keep cached too.
+    if (profiles === null) {
       localStorage.removeItem('leasely_profiles_cache')
       return
     }
+    if (profiles.length === 0) return
     // Strip to just the fields the tabs read — keeps the blob small.
     const lean = profiles.map(p => ({ id: p.id, name: p.name, persistent: p.persistent }))
     localStorage.setItem('leasely_profiles_cache', JSON.stringify(lean))

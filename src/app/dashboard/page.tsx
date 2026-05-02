@@ -170,13 +170,44 @@ export default function Dashboard() {
     return () => { pollers.forEach(t => { t.cancelled = true }); pollers.clear() }
   }, [])
 
+  // Hydration guard for the active-tab persist effect below. Without it the
+  // persist effect would fire on first render with all show-flags still false
+  // and overwrite the saved tab key before the restore logic had a chance to
+  // hydrate from it. See the equivalent pattern on `listingsHydrated` above.
+  const [tabHydrated, setTabHydrated] = useState(false)
+
   useEffect(() => {
     const saved = localStorage.getItem('leasely_properties')
-    if (saved) {
-      const props = JSON.parse(saved)
-      setSavedProperties(props)
+    const props: PropertyData[] = saved ? JSON.parse(saved) : []
+    if (props.length > 0) setSavedProperties(props)
+
+    // Restore the last-viewed tab. Previously this effect always defaulted to
+    // setActiveProperty(props[0]), which meant a reload from any other tab
+    // (Warm Accounts, Listings, etc.) silently kicked the user back to the
+    // first saved property's detail view. Persist-and-restore the high-level
+    // tab so reloads land exactly where you left off.
+    const savedTab = localStorage.getItem('leasely_active_tab')
+    const savedPropertyId = localStorage.getItem('leasely_active_property_id')
+
+    if (savedTab === 'dashboard') setShowDashboardTab(true)
+    else if (savedTab === 'listings') setShowListings(true)
+    else if (savedTab === 'warmup') setShowWarmup(true)
+    else if (savedTab === 'signin') setShowSignIn(true)
+    else if (savedTab === 'liveSessions') setShowLiveSessions(true)
+    else if (savedTab === 'settings') setShowSettings(true)
+    else if (savedTab === 'findProperty') setShowSearchView(true)
+    else if (savedTab === 'property' && savedPropertyId) {
+      const match = props.find(p => p.id === savedPropertyId)
+      if (match) setActiveProperty(match)
+      else if (props.length > 0) setActiveProperty(props[0])
+    } else {
+      // No saved tab yet (first visit) — legacy behavior: if we have saved
+      // properties, open the first one so the dashboard doesn't feel empty.
       if (props.length > 0) setActiveProperty(props[0])
     }
+
+    setTabHydrated(true)
+
     const addr = localStorage.getItem('leasely_address')
     if (addr) {
       localStorage.removeItem('leasely_address')
@@ -185,6 +216,38 @@ export default function Dashboard() {
       handleSearch(addr)
     }
   }, [])
+
+  // Persist which top-level tab is currently showing so the mount effect
+  // above can restore it. Gated on `tabHydrated` so the initial-render firing
+  // (when all show-flags are still their defaults) doesn't clobber the saved
+  // value before the restore logic has read it.
+  useEffect(() => {
+    if (!tabHydrated) return
+    let tab = ''
+    if (showDashboardTab) tab = 'dashboard'
+    else if (showListings) tab = 'listings'
+    else if (showWarmup) tab = 'warmup'
+    else if (showSignIn) tab = 'signin'
+    else if (showLiveSessions) tab = 'liveSessions'
+    else if (showSettings) tab = 'settings'
+    else if (showSearchView) tab = 'findProperty'
+    else if (activeProperty) tab = 'property'
+
+    if (tab) localStorage.setItem('leasely_active_tab', tab)
+    else localStorage.removeItem('leasely_active_tab')
+
+    if (tab === 'property' && activeProperty?.id) {
+      localStorage.setItem('leasely_active_property_id', activeProperty.id)
+    } else if (tab !== 'property') {
+      // Don't leave a stale property id lying around when we're not on one —
+      // otherwise switching between property detail views could misrestore.
+      localStorage.removeItem('leasely_active_property_id')
+    }
+  }, [
+    tabHydrated,
+    showDashboardTab, showListings, showWarmup, showSignIn, showLiveSessions,
+    showSettings, showSearchView, activeProperty,
+  ])
 
   // Autocomplete with Mapbox
   useEffect(() => {
